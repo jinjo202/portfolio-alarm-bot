@@ -310,8 +310,8 @@ def fallback_format(events, news):
 # ---------- 5. 텔레그램 ----------
 
 def send_telegram(text):
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    token = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+    chat_id = os.environ["TELEGRAM_CHAT_ID"].strip()
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     # 4096자 제한 — 줄 단위로 분할
     chunks, cur = [], ""
@@ -329,7 +329,9 @@ def send_telegram(text):
         try:
             urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
         except urllib.error.HTTPError as e:
-            if e.code == 400:  # HTML 파싱 실패 → 평문 재시도
+            body = e.read().decode("utf-8", "ignore")
+            print(f"[telegram] {e.code}: {body}")
+            if e.code == 400 and "can't parse entities" in body.lower():  # HTML 파싱 실패 → 평문 재시도
                 data = urllib.parse.urlencode({"chat_id": chat_id, "text": re.sub(r"</?b>", "", chunk),
                                                "disable_web_page_preview": "true"}).encode()
                 urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
