@@ -341,7 +341,7 @@ def send_telegram(text):
 
 def main():
     raw = os.environ.get("HOLDINGS_JSON") or (HERE / "holdings.json").read_text(encoding="utf-8")
-    holdings = json.loads(raw)["holdings"]
+    holdings = json.loads(raw.lstrip("﻿"))["holdings"]  # PowerShell 파이프가 BOM을 붙이는 경우 대응
     lookthrough = fetch_lookthrough()
     constituents = build_universe(holdings, lookthrough)
     print(f"직접보유 {len(holdings)} / 감시 구성종목 {len(constituents)}")
