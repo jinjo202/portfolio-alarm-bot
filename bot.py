@@ -97,10 +97,17 @@ def extract_js_obj(text):
 
 
 def fetch_lookthrough():
+    """pf-dash-a3k9m이 private면 raw.githubusercontent.com이 404 — PF_DASH_LOCAL_REPO가
+    가리키는 로컬 클론(맥미니는 pf-dash-runner 자동화가 이미 최신으로 유지)이 있으면 그걸 우선 읽는다."""
+    local_repo = os.environ.get("PF_DASH_LOCAL_REPO")
     merged = {}
     for f in LOOKTHROUGH_FILES:
         try:
-            obj = extract_js_obj(http_get(RAW + f))
+            if local_repo and (Path(local_repo) / f).exists():
+                text = (Path(local_repo) / f).read_text(encoding="utf-8")
+            else:
+                text = http_get(RAW + f)
+            obj = extract_js_obj(text)
         except Exception as e:
             print(f"[warn] {f}: {e}")
             continue
