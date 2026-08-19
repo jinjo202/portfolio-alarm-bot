@@ -435,7 +435,15 @@ def main():
         "news": news,
         "held_via": {c["name"]: c["held_via"] for c in constituents},
     }
-    text = summarize_with_codex(payload) or summarize_with_claude(payload) or fallback_format(events, news)
+    text = summarize_with_codex(payload)
+    source = "codex"
+    if text is None:
+        text = summarize_with_claude(payload)
+        source = "claude"
+    if text is None:
+        text = fallback_format(events, news)
+        source = "fallback(raw)"
+    print(f"[info] 요약 소스: {source}")
     send_telegram(text)
     save_sent(state, [event_key(e) for e in events] + [news_key(n) for n in news])
     print("발송 완료")
