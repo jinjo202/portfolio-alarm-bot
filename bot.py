@@ -299,8 +299,8 @@ def fallback_format(events, news):
             kind = "실적발표" if ev["type"] == "earnings" else "배당락"
             lines.append(f"· {ev['name']} ({ev['ticker']}): {ev['date']} {kind} (D-{ev['dday']})")
     if news:
-        lines.append("\n📰 <b>뉴스</b>")
-        for n in news[:25]:
+        lines.append(f"\n📰 <b>뉴스</b> ({len(news)}건 — 필터링 안 됨, ANTHROPIC_API_KEY 확인 필요)")
+        for n in news:
             lines.append(f"· [{n['query']}] {n['title']} ({n['source']})")
     if not events and not news:
         lines.append("오늘은 특이 이벤트 없음")
