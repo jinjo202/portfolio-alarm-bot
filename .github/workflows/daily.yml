@@ -1,11 +1,10 @@
 name: Daily Digest
 
-# 매일 아침 07:30 KST(22:30 UTC) 포트폴리오 이벤트 다이제스트 → 텔레그램.
+# 메인 배포는 맥미니 launchd(com.portfolio-alarm-bot.daily.plist, 매일 07:30 KST) — Codex CLI 구독 요약, API 과금 없음.
+# 여긴 수동 테스트용 보조 경로만 남긴다(schedule 트리거 없음, 중복 발송 방지).
 # sent.json(중복방지 상태)은 실행 후 커밋백.
 
 on:
-  schedule:
-    - cron: '30 22 * * *'
   workflow_dispatch:
 
 permissions:

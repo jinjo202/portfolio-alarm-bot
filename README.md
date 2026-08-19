@@ -4,10 +4,19 @@
 
 - 보유 종목: `holdings.json` (로컬 파일, git에는 안 올라감 — `HOLDINGS_JSON` secret으로 CI에 전달)
 - ETF 구성종목: [pf-dash-a3k9m](https://github.com/jinjo202/pf-dash-a3k9m)의 `etf-lookthrough-*.js`를 런타임에 가져옴 (그쪽 cron이 자동 갱신)
-- 실적 예정일·배당락: yfinance · 뉴스: Google News RSS · 요약: Claude Haiku
-- 중복 방지: `sent.json` (워크플로가 커밋백)
+- 실적 예정일·배당락: yfinance · 뉴스: Google News RSS
+- 요약: Codex CLI 구독 계정(맥미니, `CODEX_HOME` 있으면 우선) → 없으면 Claude API(`ANTHROPIC_API_KEY`, 선택) → 둘 다 없으면 원본 목록 그대로 발송
+- 중복 방지: `sent.json`
 
-## 최초 설정 (1회)
+## 실행 위치: 맥미니 (launchd, 매일 07:30 KST)
+
+메인 배포는 맥미니 cron이다 — Codex CLI 구독으로 요약해서 API 과금이 없다. `~/Developer/portfolio-alarm-bot`에 클론, `~/Library/LaunchAgents/com.portfolio-alarm-bot.daily.plist`가 매일 07:30 KST에 실행한다. `CODEX_HOME=/Users/jk/.codex-pfdash`(pf-dash-runner와 공유하는 자동화 전용 ChatGPT 계정, 이미 로그인됨)을 그대로 재사용한다.
+
+holdings.json은 git에 올리지 않고 로컬에만 둔다. TELEGRAM_BOT_TOKEN/CHAT_ID는 plist의 EnvironmentVariables에 넣는다 (파일 권한 600).
+
+## GitHub Actions (보조, 수동 테스트용)
+
+맥미니가 메인이라 스케줄 트리거는 꺼뒀다. `workflow_dispatch`로 수동 실행만 가능 — Codex를 못 쓰는 환경이라 `ANTHROPIC_API_KEY`가 없으면 원본 목록으로 발송된다.
 
 1. [@BotFather](https://t.me/BotFather)에서 봇 생성 → 토큰 복사
 2. 생성된 봇에게 아무 메시지 전송 후 `https://api.telegram.org/bot<토큰>/getUpdates`에서 `chat.id` 확인

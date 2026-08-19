@@ -250,14 +250,11 @@ def event_key(ev):
     return f"e:{ev['type']}:{ev['ticker']}:{ev['date']}"
 
 
-# ---------- 4. 요약 (Claude) ----------
+# ---------- 4. 요약 (Codex 구독 우선, Claude API 폴백) ----------
 
-def summarize_with_claude(payload):
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        return None
+def build_summary_prompt(payload):
     today = NOW.astimezone(KST).strftime("%-m/%-d (%a)") if os.name != "nt" else NOW.astimezone(KST).strftime("%m/%d")
-    prompt = f"""너는 포트폴리오 모닝브리프 작성자다. 아래 JSON은 내 보유 ETF들과 그 상위 구성종목에 대해
+    return f"""너는 포트폴리오 모닝브리프 작성자다. 아래 JSON은 내 보유 ETF들과 그 상위 구성종목에 대해
 오늘 수집한 이벤트(실적 발표 예정, 배당락)와 최근 뉴스 헤드라인이다.
 
 이 중 주가에 실제로 영향을 줄 만한 것만 골라 한국어 텔레그램 메시지로 요약하라.
@@ -273,6 +270,62 @@ def summarize_with_claude(payload):
 
 JSON:
 {json.dumps(payload, ensure_ascii=False)}"""
+
+
+CODEX_SAFE_ENV_NAMES = ("CODEX_HOME", "HOME", "LANG", "LC_ALL", "PATH", "TMPDIR", "USER")
+CODEX_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["message"],
+    "properties": {"message": {"type": "string"}},
+}
+
+
+def summarize_with_codex(payload):
+    """맥미니 전용 자동화 ChatGPT 계정(CODEX_HOME)으로 codex exec 호출 — 구독 정액, API 과금 없음."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    binary = shutil.which("codex")
+    if not binary or not os.environ.get("CODEX_HOME"):
+        return None
+    environment = {n: os.environ[n] for n in CODEX_SAFE_ENV_NAMES if os.environ.get(n)}
+    environment["NO_COLOR"] = "1"
+    prompt = build_summary_prompt(payload)
+    with tempfile.TemporaryDirectory(prefix="alarmbot-codex-") as tmp:
+        tmp = Path(tmp)
+        schema_path = tmp / "schema.json"
+        result_path = tmp / "result.json"
+        workdir = tmp / "workdir"
+        workdir.mkdir()
+        schema_path.write_text(json.dumps(CODEX_SCHEMA), encoding="utf-8")
+        command = [binary, "exec", "--ignore-user-config", "--ignore-rules",
+                   "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
+                   "--model", "gpt-5.6-luna",
+                   "--config", 'model_reasoning_effort="medium"',
+                   "--output-schema", str(schema_path),
+                   "--output-last-message", str(result_path),
+                   "-C", str(workdir), "-"]
+        try:
+            completed = subprocess.run(command, input=prompt, capture_output=True, text=True,
+                                        env=environment, timeout=180, check=False)
+            if completed.returncode != 0:
+                print(f"[warn] codex exec 실패({completed.returncode}): {completed.stderr[:500]}")
+                return None
+            data = json.loads(result_path.read_text(encoding="utf-8"))
+            return data["message"]
+        except Exception as e:
+            print(f"[warn] Codex 요약 실패, 다음 방법으로 폴백: {e}")
+            return None
+
+
+def summarize_with_claude(payload):
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return None
+    prompt = build_summary_prompt(payload)
     body = json.dumps({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 2000,
@@ -375,7 +428,7 @@ def main():
         "news": news,
         "held_via": {c["name"]: c["held_via"] for c in constituents},
     }
-    text = summarize_with_claude(payload) or fallback_format(events, news)
+    text = summarize_with_codex(payload) or summarize_with_claude(payload) or fallback_format(events, news)
     send_telegram(text)
     save_sent(state, [event_key(e) for e in events] + [news_key(n) for n in news])
     print("발송 완료")
