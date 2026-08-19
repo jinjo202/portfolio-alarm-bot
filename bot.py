@@ -271,9 +271,11 @@ def build_summary_prompt(payload):
 - 실적 발표 일정, 배당, M&A, 대규모 투자/수주, 가이던스 변경, 규제, 신제품, 애널리스트 목표주가 변경은 남겨라.
 - 각 항목에 어느 보유 ETF와 관련되는지 짧게 표기 (payload의 held_via 참고).
 - 형식: 섹션 이모지 + 제목(💰 배당 / 📈 실적 / 📰 주요 뉴스), 항목은 "· " 불릿.
+- 💰 배당과 📈 실적 섹션은 항상 넣어라 — payload의 events(type: ex_dividend/earnings)에 해당 항목이 없으면
+  섹션 자체를 빼지 말고 "· 없음"이라고 명시해라. (놓친 게 아니라 확인했다는 걸 보여주기 위함)
+- 📰 뉴스 섹션은 실을 게 없으면 생략해도 된다.
 - 텔레그램 HTML만 사용: <b></b> 만 허용. 마크다운 금지. 전체 3500자 이내.
 - 첫 줄: "📊 포트폴리오 모닝브리프 — {today}"
-- 남길 게 하나도 없으면 그 섹션 생략. 전부 없으면 "오늘은 특이 이벤트 없음" 한 줄.
 
 JSON:
 {json.dumps(payload, ensure_ascii=False)}"""
@@ -352,18 +354,25 @@ def summarize_with_claude(payload):
 
 def fallback_format(events, news):
     today = NOW.astimezone(KST).strftime("%m/%d")
+    dividends = [e for e in events if e["type"] == "ex_dividend"]
+    earnings = [e for e in events if e["type"] == "earnings"]
     lines = [f"📊 포트폴리오 모닝브리프 — {today} (요약 없이 원본)"]
-    if events:
-        lines.append("\n📅 <b>실적/배당 일정</b>")
-        for ev in events:
-            kind = "실적발표" if ev["type"] == "earnings" else "배당락"
-            lines.append(f"· {ev['name']} ({ev['ticker']}): {ev['date']} {kind} (D-{ev['dday']})")
+    lines.append("\n💰 <b>배당</b>")
+    if dividends:
+        for ev in dividends:
+            lines.append(f"· {ev['name']} ({ev['ticker']}): {ev['date']} 배당락 (D-{ev['dday']})")
+    else:
+        lines.append("· 없음")
+    lines.append("\n📈 <b>실적</b>")
+    if earnings:
+        for ev in earnings:
+            lines.append(f"· {ev['name']} ({ev['ticker']}): {ev['date']} 실적발표 (D-{ev['dday']})")
+    else:
+        lines.append("· 없음")
     if news:
         lines.append(f"\n📰 <b>뉴스</b> ({len(news)}건 — 필터링 안 됨, ANTHROPIC_API_KEY 확인 필요)")
         for n in news:
             lines.append(f"· [{n['query']}] {n['title']} ({n['source']})")
-    if not events and not news:
-        lines.append("오늘은 특이 이벤트 없음")
     return "\n".join(lines)
 
 
