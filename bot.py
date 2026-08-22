@@ -35,7 +35,7 @@ LOOKTHROUGH_FILES = [
 ]
 
 TOP_N_PER_ETF = 10      # ETF당 감시할 상위 구성종목 수
-MAX_CONSTITUENTS = 30   # 전체 감시 구성종목 상한
+MAX_CONSTITUENTS = 50   # 전체 감시 구성종목 상한
 NEWS_PER_NAME = 3
 NEWS_WINDOW_H = 36      # 최근 N시간 뉴스만
 EVENT_WINDOW_D = 7      # 실적/배당락 D-7 이내만
@@ -157,7 +157,7 @@ def build_universe(holdings, lookthrough):
         for r in rows:
             add(r["name"], r["w"], h["name"])
         for extra in h.get("extra_constituents", []):
-            add(extra, 0.05, h["name"])
+            add(extra, 0.06, h["name"])  # 수동 지정 종목은 롱테일보다 항상 우선
     top = sorted(agg.values(), key=lambda c: -c["score"])[:MAX_CONSTITUENTS]
     return [{**c, "score": round(c["score"], 4)} for c in top]
 
