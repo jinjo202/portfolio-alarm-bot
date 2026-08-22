@@ -11,7 +11,7 @@ PF_DASH_LOCAL_REPO(pf-dash-a3k9m 클론)가 있어야 동작한다. 없으면 No
   YTD 매각이익(실현)   = Σ (ytd_sell − cost_sold)
   YTD 배당            = Σ dividend
   YTD 총손익           = 평가손익 + 매각이익 + 배당
-  YTD 수익률           = 총손익 / Σ book_basis
+  YTD 수익률           = 총손익 / 평균잔액(historical.portfolio_total의 YTD 평균)
   금일 평가손익        = Σ daily_pnl            # 국내/해외 분리
 
 주의: buy 필드는 종목마다 단위(주당가/억원)가 불일치해 쓰지 않는다 — portfolio.html
@@ -82,12 +82,18 @@ def summarize_pnl():
     dividend = tot("dividend")
     # 기준일: 종목별 daily_close_date 중 가장 최근 (국내/해외 마감 시차 존재)
     dates = sorted({h.get("daily_close_date") for h in H if h.get("daily_close_date")})
+    # 수익률 분모 = 시간가중 평균잔액. 대시보드 computeAvgBalanceFromHistorical()와 같은 정의.
+    series = [v for v in ((obj.get("historical") or {}).get("portfolio_total") or [])
+              if v is not None]
+    avg_invested = sum(series) / len(series) if series else basis
     return {
         "as_of": obj.get("last_updated", ""),
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
-        "total_pnl_pct": (unrealized + realized + dividend) / basis * 100 if basis else 0,
+        "avg_invested": avg_invested,
+        "total_pnl_pct": (unrealized + realized + dividend) / avg_invested * 100
+        if avg_invested else 0,
         "unrealized": unrealized,
         "realized": realized,
         "dividend": dividend,
@@ -115,7 +121,8 @@ def format_pnl(p):
         return None
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
     lines.append(f"· 총 평가금액: <b>{_won(p['total_mkt']).lstrip('+')}</b>")
-    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> ({p['total_pnl_pct']:+.2f}%)")
+    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
+                 f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
     lines.append(f"· 금일 평가손익: <b>{_won(p['daily_pnl'])}</b>")
     lines.append(f"   국내 {_won(p['daily_pnl_kr'])} ({p['daily_pct_kr']:+.2f}%) · "
