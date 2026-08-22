@@ -7,11 +7,15 @@ PF_DASH_LOCAL_REPO(pf-dash-a3k9m 클론)가 있어야 동작한다. 없으면 No
 
 집계 정의는 대시보드(portfolio.html)와 맞춘다:
   총평가금액 = Σ mkt
-  YTD 평가손익(미실현) = Σ (mkt − buy)      # 평균원가 기준
+  YTD 평가손익(미실현) = Σ (mkt − book_basis)   # 한국식 평균매입가 회계의 잔여 장부가 기준
   YTD 매각이익(실현)   = Σ (ytd_sell − cost_sold)
   YTD 배당            = Σ dividend
   YTD 총손익           = 평가손익 + 매각이익 + 배당
-  금일 평가손익        = Σ daily_pnl        # 국내/해외 분리
+  YTD 수익률           = 총손익 / Σ book_basis
+  금일 평가손익        = Σ daily_pnl            # 국내/해외 분리
+
+주의: buy 필드는 종목마다 단위(주당가/억원)가 불일치해 쓰지 않는다 — portfolio.html
+cumBase() 주석과 동일한 이유. 반드시 book_basis를 원가 기준으로 쓸 것.
 """
 import base64
 import json
@@ -70,8 +74,10 @@ def summarize_pnl():
     tot = lambda k, rows=H: sum(r.get(k) or 0 for r in rows)
     kr = [h for h in H if (h.get("region") or "") == "한국"]
     ov = [h for h in H if (h.get("region") or "") != "한국"]
-    mkt, buy = tot("mkt"), tot("buy")
-    unrealized = mkt - buy
+    mkt = tot("mkt")
+    basis = sum(h["book_basis"] if h.get("book_basis") is not None else (h.get("buy") or 0)
+                for h in H)
+    unrealized = mkt - basis
     realized = tot("ytd_sell") - tot("cost_sold")
     dividend = tot("dividend")
     # 기준일: 종목별 daily_close_date 중 가장 최근 (국내/해외 마감 시차 존재)
@@ -81,7 +87,7 @@ def summarize_pnl():
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
-        "total_pnl_pct": (unrealized + realized + dividend) / buy * 100 if buy else 0,
+        "total_pnl_pct": (unrealized + realized + dividend) / basis * 100 if basis else 0,
         "unrealized": unrealized,
         "realized": realized,
         "dividend": dividend,
