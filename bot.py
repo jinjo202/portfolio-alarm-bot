@@ -669,12 +669,12 @@ def intraday():
 
 def market_close():
     """한국장 마감 후: 손익만 간단히. 뉴스·공시는 수시 알림이 이미 담당."""
-    block = pnl.format_pnl(pnl.summarize_pnl())
+    block = pnl.format_pnl(pnl.summarize_pnl(), kr_only=True)
     if not block:
         print("[warn] 손익 데이터 없음 — 발송 생략")
         return
     stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
-    send_telegram(f"🔔 <b>장 마감 손익</b> — {stamp}\n\n{block}")
+    send_telegram(f"🔔 <b>국내 장 마감 손익</b> — {stamp}\n\n{block}")
     print("발송 완료")
 
 

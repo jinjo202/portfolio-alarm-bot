@@ -115,8 +115,13 @@ def _won(v):
     return f"{sign}{v:,.2f}억원"
 
 
-def format_pnl(p, daily_label="금일 평가손익"):
-    """텔레그램 HTML 손익 섹션. daily_label로 '금일'/'전일 대비' 구분."""
+def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
+    """텔레그램 HTML 손익 섹션.
+
+    daily_label로 '금일'/'전일 대비' 구분.
+    kr_only=True면 일간 손익을 국내만 표시 — 한국장 마감 직후엔 해외가 아직
+    전일 종가라 국내와 합산하면 오해를 부른다.
+    """
     if not p:
         return None
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
@@ -124,9 +129,14 @@ def format_pnl(p, daily_label="금일 평가손익"):
     lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
                  f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
-    lines.append(f"· {daily_label}: <b>{_won(p['daily_pnl'])}</b>")
-    lines.append(f"   국내 {_won(p['daily_pnl_kr'])} ({p['daily_pct_kr']:+.2f}%) · "
-                 f"해외 {_won(p['daily_pnl_ov'])} ({p['daily_pct_ov']:+.2f}%)")
+    if kr_only:
+        lines.append(f"· {daily_label}(국내): <b>{_won(p['daily_pnl_kr'])}</b> "
+                     f"({p['daily_pct_kr']:+.2f}%)")
+        lines.append("   해외는 아직 당일 시세 미반영 — 내일 아침 브리프에서 확인")
+    else:
+        lines.append(f"· {daily_label}: <b>{_won(p['daily_pnl'])}</b>")
+        lines.append(f"   국내 {_won(p['daily_pnl_kr'])} ({p['daily_pct_kr']:+.2f}%) · "
+                     f"해외 {_won(p['daily_pnl_ov'])} ({p['daily_pct_ov']:+.2f}%)")
     return "\n".join(lines)
 
 
