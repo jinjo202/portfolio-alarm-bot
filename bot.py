@@ -601,7 +601,7 @@ def main():
     disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
     print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
-    pnl_block = pnl.format_pnl(pnl.summarize_pnl())
+    pnl_block = pnl.format_pnl(pnl.summarize_pnl(), daily_label="전일 대비 평가손익")
     payload = {
         "date_kst": NOW.astimezone(KST).isoformat(),
         "pnl_block": pnl_block,
