@@ -631,7 +631,8 @@ def intraday():
     seen = set(state["keys"])
     judged = set(state.get("judged", []))
 
-    disclosures = [d for d in collect_disclosures(constituents) if disclosure_key(d) not in seen]
+    # 전날까지 조회: 22시 이후 늦은 공시·주말 전 공시도 놓치지 않게 (중복은 sent.json이 막음)
+    disclosures = [d for d in collect_disclosures(constituents, days_back=1) if disclosure_key(d) not in seen]
     news = [n for n in collect_news(holdings, lookthrough, constituents)
             if news_key(n) not in seen and news_key(n) not in judged]
     print(f"신규 공시 {len(disclosures)} / 미판정 뉴스 {len(news)}")
