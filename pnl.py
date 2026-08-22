@@ -92,9 +92,26 @@ def summarize_pnl():
         r = h.get("region") or "기타"
         by_region[r] = by_region.get(r, 0) + (h.get("mkt") or 0)
     region_mix = sorted(by_region.items(), key=lambda kv: -kv[1])
+    # 지역 안의 국가 분해 (lookthrough.country 가중). 유럽·글로벌은 국가가 섞여 있어
+    # 지역 이름만으론 실제 노출이 안 보인다.
+    region_countries = {}
+    for reg in ("유럽", "글로벌"):
+        agg = {}
+        for h in H:
+            if (h.get("region") or "") != reg:
+                continue
+            mkt = h.get("mkt") or 0
+            for code, w in ((h.get("lookthrough") or {}).get("country") or {}).items():
+                agg[code] = agg.get(code, 0) + mkt * w
+        total = sum(agg.values())
+        if total:
+            region_countries[reg] = [(COUNTRY_KO.get(c, c), v / total * 100)
+                                     for c, v in sorted(agg.items(), key=lambda kv: -kv[1])
+                                     if c != "Other"]
     return {
         "as_of": obj.get("last_updated", ""),
         "region_mix": region_mix,
+        "region_countries": region_countries,
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
@@ -112,6 +129,15 @@ def summarize_pnl():
         "daily_pct_ov": tot("daily_pnl", ov) / (tot("mkt", ov) - tot("daily_pnl", ov)) * 100
         if tot("mkt", ov) - tot("daily_pnl", ov) else 0,
     }
+
+
+COUNTRY_KO = {
+    "JP": "일본", "CA": "캐나다", "UK": "영국", "GB": "영국", "FR": "프랑스",
+    "DE": "독일", "CH": "스위스", "NL": "네덜란드", "IT": "이탈리아", "ES": "스페인",
+    "SE": "스웨덴", "DK": "덴마크", "AU": "호주", "HK": "홍콩", "SG": "싱가포르",
+    "US": "미국", "KR": "한국", "CN": "중국", "TW": "대만", "IN": "인도",
+    "BR": "브라질", "NO": "노르웨이", "FI": "핀란드", "BE": "벨기에", "IE": "아일랜드",
+}
 
 
 def _won(v):
@@ -134,8 +160,16 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
     lines.append(f"· 총 평가금액: <b>{_won(p['total_mkt']).lstrip('+')}</b>")
     if p.get("region_mix") and p["total_mkt"]:
-        mix = " · ".join(f"{r} {v / p['total_mkt'] * 100:.1f}%" for r, v in p["region_mix"])
-        lines.append(f"   {mix}")
+        parts = []
+        for r, v in p["region_mix"]:
+            pct = v / p["total_mkt"] * 100
+            detail = p.get("region_countries", {}).get(r)
+            if detail:   # 유럽·글로벌은 룩스루 상위 국가를 괄호로
+                inner = ", ".join(f"{c} {cp:.0f}%" for c, cp in detail[:3])
+                parts.append(f"{r} {pct:.1f}%({inner})")
+            else:
+                parts.append(f"{r} {pct:.1f}%")
+        lines.append("   " + " · ".join(parts))
     lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
                  f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
