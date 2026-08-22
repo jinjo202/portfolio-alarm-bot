@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .gstack/
 holdings.json
+corp_codes.json

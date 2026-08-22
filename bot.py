@@ -72,6 +72,7 @@ TICKER_PATTERNS = [
     (r"셀트리온", "068270.KS"), (r"알테오젠", "196170.KQ"),
     (r"HD현대일렉트릭", "267260.KS"), (r"LS ELECTRIC", "010120.KS"),
     (r"효성중공업", "298040.KS"), (r"NAVER", "035420.KS"), (r"카카오", "035720.KS"),
+    (r"삼성전기", "009150.KS"), (r"SK스퀘어", "402340.KS"),
 ]
 
 
@@ -229,6 +230,97 @@ def is_korean(s):
     return bool(re.search(r"[가-힣]", s))
 
 
+# ---------- 2.5 공시 (DART) ----------
+
+# 주가 영향 큰 공시만 (report_nm 키워드). 정기보고서·단순 IR 등은 제외.
+DART_IMPORTANT_RE = re.compile(
+    r"주요사항|자기주식|소각|배당|주주환원|기업가치|밸류업|유상증자|무상증자|합병|분할|"
+    r"영업양수|영업양도|공급계약|단일판매|수주|잠정.*실적|손익구조|영업.*정지|회생|파산|"
+    r"상장폐지|감자|전환사채|신주인수권|교환사채|소송|횡령|배임|최대주주.*변경|조회공시|풍문"
+)
+CORP_CACHE = HERE / "corp_codes.json"
+
+
+def load_dart_key():
+    """DART_API_KEY 환경변수, 없으면 DART_ENV_FILE(KEY=VALUE 파일)에서 — pf-dash-runner 키 재사용."""
+    key = os.environ.get("DART_API_KEY")
+    if key:
+        return key.strip()
+    env_file = os.environ.get("DART_ENV_FILE")
+    if env_file and Path(env_file).exists():
+        for line in Path(env_file).read_text(encoding="utf-8").splitlines():
+            m = re.match(r"""\s*DART_API_KEY\s*=\s*["']?([^"'\s]+)""", line)
+            if m:
+                return m.group(1)
+    return None
+
+
+def kr_corp_map(constituents, api_key):
+    """6자리 한국 종목코드 → DART corp_code. corpCode.xml(zip, ~10MB)은 1회 받아 캐시."""
+    import zipfile, io as _io
+    import xml.etree.ElementTree as ET
+    needed = {}
+    for c in constituents:
+        tk = c.get("ticker") or ""
+        if re.fullmatch(r"\d{6}\.(KS|KQ)", tk):
+            needed[tk[:6]] = c["name"]
+    if not needed:
+        return {}
+    cache = {}
+    if CORP_CACHE.exists():
+        try:
+            cache = json.loads(CORP_CACHE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            cache = {}
+    if all(code in cache for code in needed):
+        return {code: cache[code] for code in needed}
+    url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={api_key}"
+    try:
+        blob = urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60).read()
+        with zipfile.ZipFile(_io.BytesIO(blob)) as z:
+            xml = z.read(z.namelist()[0])
+        for el in ET.fromstring(xml).iter("list"):
+            sc = (el.findtext("stock_code") or "").strip()
+            if sc in needed:
+                cache[sc] = {"corp_code": el.findtext("corp_code").strip(),
+                             "corp_name": el.findtext("corp_name").strip()}
+        CORP_CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:
+        print(f"[warn] corpCode 다운로드 실패: {e}")
+    missing = [needed[c] for c in needed if c not in cache]
+    if missing:
+        print(f"[warn] corp_code 없음: {missing}")
+    return {code: cache[code] for code in needed if code in cache}
+
+
+def fetch_dart_disclosures(api_key, corp_map, days_back=0):
+    """회사별 list.json 조회 (종목당 1콜) → 중요 키워드 공시만."""
+    out = []
+    bgn = (NOW.astimezone(KST).date() - timedelta(days=days_back)).strftime("%Y%m%d")
+    end = NOW.astimezone(KST).date().strftime("%Y%m%d")
+    for code, corp in corp_map.items():
+        q = urllib.parse.urlencode({"crtfc_key": api_key, "corp_code": corp["corp_code"],
+                                    "bgn_de": bgn, "end_de": end, "page_count": 50})
+        try:
+            data = json.loads(http_get("https://opendart.fss.or.kr/api/list.json?" + q, timeout=20))
+        except Exception as e:
+            print(f"[warn] DART {corp['corp_name']}: {e}")
+            continue
+        if data.get("status") != "000":
+            continue
+        for it in data.get("list", []):
+            if DART_IMPORTANT_RE.search(it.get("report_nm", "")):
+                out.append({"corp_name": corp["corp_name"], "report_nm": it["report_nm"].strip(),
+                            "rcept_no": it["rcept_no"], "date": it.get("rcept_dt", ""),
+                            "url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={it['rcept_no']}"})
+        time.sleep(0.1)
+    return out
+
+
+def disclosure_key(d):
+    return "d:" + d["rcept_no"]
+
+
 # ---------- 3. 중복 방지 ----------
 
 SENT = HERE / "sent.json"
@@ -240,11 +332,12 @@ def load_sent():
             return json.loads(SENT.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             pass
-    return {"keys": []}
+    return {"keys": [], "judged": []}
 
 
-def save_sent(state, new_keys):
-    state["keys"] = (state["keys"] + new_keys)[-2000:]
+def save_sent(state, new_keys, judged=()):
+    state["keys"] = (state["keys"] + list(new_keys))[-2000:]
+    state["judged"] = (state.get("judged", []) + list(judged))[-2000:]
     SENT.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
@@ -273,6 +366,7 @@ def build_summary_prompt(payload):
 - 형식: 섹션 이모지 + 제목(💰 배당 / 📈 실적 / 📰 주요 뉴스), 항목은 "· " 불릿.
 - 💰 배당과 📈 실적 섹션은 항상 넣어라 — payload의 events(type: ex_dividend/earnings)에 해당 항목이 없으면
   섹션 자체를 빼지 말고 "· 없음"이라고 명시해라. (놓친 게 아니라 확인했다는 걸 보여주기 위함)
+- payload에 disclosures(DART 공시)가 있으면 📢 공시 섹션으로 전부 표시하라(공시는 필터링 금지, 제목+URL).
 - 📰 뉴스 섹션은 실을 게 없으면 생략해도 된다.
 - 텔레그램 HTML만 사용: <b></b> 만 허용. 마크다운 금지. 전체 3500자 이내.
 - 첫 줄: "📊 포트폴리오 모닝브리프 — {today}"
@@ -291,8 +385,9 @@ CODEX_SCHEMA = {
 }
 
 
-def summarize_with_codex(payload):
-    """맥미니 전용 자동화 ChatGPT 계정(CODEX_HOME)으로 codex exec 호출 — 구독 정액, API 과금 없음."""
+def codex_exec(prompt, schema):
+    """맥미니 전용 자동화 ChatGPT 계정(CODEX_HOME)으로 codex exec 호출 — 구독 정액, API 과금 없음.
+    schema에 맞는 dict 반환, 불가하면 None."""
     import shutil
     import subprocess
     import tempfile
@@ -302,14 +397,13 @@ def summarize_with_codex(payload):
         return None
     environment = {n: os.environ[n] for n in CODEX_SAFE_ENV_NAMES if os.environ.get(n)}
     environment["NO_COLOR"] = "1"
-    prompt = build_summary_prompt(payload)
     with tempfile.TemporaryDirectory(prefix="alarmbot-codex-") as tmp:
         tmp = Path(tmp)
         schema_path = tmp / "schema.json"
         result_path = tmp / "result.json"
         workdir = tmp / "workdir"
         workdir.mkdir()
-        schema_path.write_text(json.dumps(CODEX_SCHEMA), encoding="utf-8")
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
         command = [binary, "exec", "--ignore-user-config", "--ignore-rules",
                    "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
                    "--model", "gpt-5.6-luna",
@@ -323,11 +417,49 @@ def summarize_with_codex(payload):
             if completed.returncode != 0:
                 print(f"[warn] codex exec 실패({completed.returncode}): {completed.stderr[:500]}")
                 return None
-            data = json.loads(result_path.read_text(encoding="utf-8"))
-            return data["message"]
+            return json.loads(result_path.read_text(encoding="utf-8"))
         except Exception as e:
-            print(f"[warn] Codex 요약 실패, 다음 방법으로 폴백: {e}")
+            print(f"[warn] Codex 실행 실패: {e}")
             return None
+
+
+def summarize_with_codex(payload):
+    data = codex_exec(build_summary_prompt(payload), CODEX_SCHEMA)
+    return data["message"] if data else None
+
+
+INTRADAY_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["alerts"],
+    "properties": {"alerts": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["text", "article_indexes"],
+        "properties": {"text": {"type": "string"},
+                       "article_indexes": {"type": "array", "items": {"type": "integer"}}}}}},
+}
+
+
+def judge_urgent_news(news, held_via):
+    """수시 알림용: 새 뉴스 중 즉시 알릴 가치 있는 것만 Codex가 선별. [(text, [idx...])] 반환, 실패 시 None."""
+    items = [{"idx": i, "query": n["query"], "title": n["title"], "source": n["source"],
+              "held_via": held_via.get(n["query"], [])} for i, n in enumerate(news)]
+    prompt = f"""너는 포트폴리오 수시 알림 필터다. 아래는 내 보유 ETF의 상위 구성종목에 대해 방금 새로 수집된 뉴스 헤드라인이다.
+이 중 아침 브리프까지 기다리지 않고 "지금 바로" 알려야 할 중대 이벤트만 골라라. 기준은 엄격하게:
+- 남길 것: 자사주 매입/소각·주주환원·배당 정책 발표, 합병/분할/M&A, 대규모 수주·투자·증설, 실적 서프라이즈/가이던스 변경,
+  규제·소송·사고 등 중대 악재, 경영진 교체, 목표주가 대폭 변경.
+- 버릴 것: 단순 시세/등락 기사, 시황·전망·칼럼, 이미 알려진 내용의 재탕, 광고성/SEO 기사.
+- 같은 사건을 다룬 기사 여러 건은 하나로 합쳐라.
+각 알림 text는 한국어 1~2줄: 종목명 + 핵심 내용 + (관련 보유 ETF, 출처). 텔레그램 HTML <b></b>만 허용.
+article_indexes에는 그 알림의 근거가 된 기사 idx를 넣어라. 알릴 게 없으면 alerts는 빈 배열.
+
+JSON:
+{json.dumps(items, ensure_ascii=False)}"""
+    data = codex_exec(prompt, INTRADAY_SCHEMA)
+    if not data:
+        return None
+    return [(a["text"], a.get("article_indexes", [])) for a in data.get("alerts", [])]
 
 
 def summarize_with_claude(payload):
@@ -352,11 +484,20 @@ def summarize_with_claude(payload):
         return None
 
 
-def fallback_format(events, news):
+def format_disclosures(disclosures):
+    lines = ["📢 <b>공시</b>"]
+    for d in disclosures:
+        lines.append(f"· {d['corp_name']}: {d['report_nm']}\n  {d['url']}")
+    return "\n".join(lines)
+
+
+def fallback_format(events, news, disclosures=()):
     today = NOW.astimezone(KST).strftime("%m/%d")
     dividends = [e for e in events if e["type"] == "ex_dividend"]
     earnings = [e for e in events if e["type"] == "earnings"]
     lines = [f"📊 포트폴리오 모닝브리프 — {today} (요약 없이 원본)"]
+    if disclosures:
+        lines.append("\n" + format_disclosures(disclosures))
     lines.append("\n💰 <b>배당</b>")
     if dividends:
         for ev in dividends:
@@ -410,37 +551,57 @@ def send_telegram(text):
 
 # ---------- main ----------
 
-def main():
+def load_universe():
     raw = os.environ.get("HOLDINGS_JSON") or (HERE / "holdings.json").read_text(encoding="utf-8")
-    holdings = json.loads(raw.lstrip("﻿"))["holdings"]  # PowerShell 파이프가 BOM을 붙이는 경우 대응
+    holdings = json.loads(raw.lstrip("\ufeff"))["holdings"]  # PowerShell 파이프가 BOM을 붙이는 경우 대응
     lookthrough = fetch_lookthrough()
     constituents = build_universe(holdings, lookthrough)
     print(f"직접보유 {len(holdings)} / 감시 구성종목 {len(constituents)}")
+    return holdings, lookthrough, constituents
+
+
+def collect_news(holdings, lookthrough, constituents):
+    """구성종목 + 룩스루 없는 직접보유(펀드/테마ETF는 자체 뉴스 감시)."""
+    news = []
+    targets = [c["name"] for c in constituents]
+    targets += [h["name"] for h in holdings if h["name"] not in lookthrough]
+    for name in targets:
+        news.extend(fetch_news(name, is_korean(name)))
+        time.sleep(0.4)
+    return news
+
+
+def collect_disclosures(constituents, days_back=0):
+    key = load_dart_key()
+    if not key:
+        print("[info] DART 키 없음 — 공시 감시 생략")
+        return []
+    return fetch_dart_disclosures(key, kr_corp_map(constituents, key), days_back)
+
+
+def main():
+    holdings, lookthrough, constituents = load_universe()
     for c in constituents:
         print(f"  {c['name']:40s} {c['ticker'] or '-':12s} {c['score']}")
 
     # 이벤트: 티커 있는 구성종목만 (ETF 자체는 yfinance calendar 미지원)
     watch_tickers = [(c["name"], c["ticker"]) for c in constituents if c["ticker"]]
     events = fetch_calendar_events(watch_tickers)
+    news = collect_news(holdings, lookthrough, constituents)
+    disclosures = collect_disclosures(constituents, days_back=1)  # 전날 밤~새벽 공시까지
 
-    # 뉴스: 구성종목 + 룩스루 없는 직접보유(펀드/테마ETF는 자체 뉴스 감시)
-    news = []
-    news_targets = [c["name"] for c in constituents]
-    news_targets += [h["name"] for h in holdings if h["name"] not in lookthrough]
-    for name in news_targets:
-        news.extend(fetch_news(name, is_korean(name)))
-        time.sleep(0.4)
-
-    # 중복 제거
+    # 중복 제거 (아침은 수시 알림이 이미 보낸 것만 제외 — judged는 무시)
     state = load_sent()
     seen = set(state["keys"])
     events = [e for e in events if event_key(e) not in seen]
     news = [n for n in news if news_key(n) not in seen]
-    print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)}")
+    disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
+    print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
     payload = {
         "date_kst": NOW.astimezone(KST).isoformat(),
         "events": events,
+        "disclosures": disclosures,
         "news": news,
         "held_via": {c["name"]: c["held_via"] for c in constituents},
     }
@@ -450,13 +611,52 @@ def main():
         text = summarize_with_claude(payload)
         source = "claude"
     if text is None:
-        text = fallback_format(events, news)
+        text = fallback_format(events, news, disclosures)
         source = "fallback(raw)"
     print(f"[info] 요약 소스: {source}")
     send_telegram(text)
-    save_sent(state, [event_key(e) for e in events] + [news_key(n) for n in news])
+    save_sent(state, [event_key(e) for e in events] + [news_key(n) for n in news]
+              + [disclosure_key(d) for d in disclosures])
     print("발송 완료")
 
 
+def intraday():
+    """30분마다: 새 공시는 즉시, 새 뉴스는 Codex가 중대하다고 판정한 것만 즉시 발송."""
+    hour = NOW.astimezone(KST).hour
+    if not (8 <= hour <= 22):
+        print(f"[info] KST {hour}시 — 수시 알림 시간대(08~22시) 아님, 종료")
+        return
+    holdings, lookthrough, constituents = load_universe()
+    state = load_sent()
+    seen = set(state["keys"])
+    judged = set(state.get("judged", []))
+
+    disclosures = [d for d in collect_disclosures(constituents) if disclosure_key(d) not in seen]
+    news = [n for n in collect_news(holdings, lookthrough, constituents)
+            if news_key(n) not in seen and news_key(n) not in judged]
+    print(f"신규 공시 {len(disclosures)} / 미판정 뉴스 {len(news)}")
+
+    sections, sent_keys = [], [disclosure_key(d) for d in disclosures]
+    if disclosures:
+        sections.append(format_disclosures(disclosures))
+    if news:
+        held_via = {c["name"]: c["held_via"] for c in constituents}
+        alerts = judge_urgent_news(news, held_via)
+        if alerts is None:
+            print("[warn] Codex 판정 실패 — 이번 회차 뉴스는 다음 회차에 재시도")
+            news = []   # judged에 넣지 않아 다음 회차에 다시 판정
+        elif alerts:
+            sections.append("🔔 <b>주요 뉴스</b>\n" + "\n".join(f"· {t}" for t, _ in alerts))
+            for _, idxs in alerts:
+                sent_keys += [news_key(news[i]) for i in idxs if 0 <= i < len(news)]
+    if sections:
+        stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
+        send_telegram(f"⚡ <b>수시 알림</b> — {stamp}\n\n" + "\n\n".join(sections))
+        print("발송 완료")
+    else:
+        print("알릴 것 없음")
+    save_sent(state, sent_keys, judged=[news_key(n) for n in news])
+
+
 if __name__ == "__main__":
-    main()
+    intraday() if "intraday" in sys.argv[1:] else main()
