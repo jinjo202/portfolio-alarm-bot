@@ -96,7 +96,7 @@ def summarize_pnl():
         for code, w in ((row.get("lookthrough") or {}).get("country") or {}).items():
             country[code] = country.get(code, 0) + row_mkt * w
     exposure = {}
-    others = {}   # '기타' 안에서 어느 나라가 큰지 보여주기 위한 내역
+    detail = {}   # 그룹 안에서 어느 나라가 큰지 (이머징·기타 괄호 표기용)
     for code, v in country.items():
         if code == "KR":
             label = "한국"
@@ -108,16 +108,18 @@ def summarize_pnl():
             label = "이머징"
         else:   # 일본·호주·캐나다 등 선진국 ex-US/EU + 국가 미상(Other)
             label = "기타"
-            if code != "Other":
-                nm = COUNTRY_KO.get(code, code)
-                others[nm] = others.get(nm, 0) + v
         exposure[label] = exposure.get(label, 0) + v
+        if code != "Other":
+            nm = COUNTRY_KO.get(code, code)
+            detail.setdefault(label, {})
+            detail[label][nm] = detail[label].get(nm, 0) + v
     country_mix = sorted(exposure.items(), key=lambda kv: -kv[1])
-    other_detail = sorted(others.items(), key=lambda kv: -kv[1])
+    group_detail = {g: sorted(d.items(), key=lambda kv: -kv[1])
+                    for g, d in detail.items()}
     return {
         "as_of": obj.get("last_updated", ""),
         "country_mix": country_mix,
-        "other_detail": other_detail,
+        "group_detail": group_detail,
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
@@ -176,13 +178,21 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
     if p.get("country_mix") and p["total_mkt"]:
         # 룩스루 국가 노출을 한국/미국/유럽/이머징/기타로 묶어 표기
         pct = {c: v / p["total_mkt"] * 100 for c, v in p["country_mix"]}
-        parts = [f"{g} {pct[g]:.1f}%" for g in ("한국", "미국", "유럽", "이머징")
+        gd = p.get("group_detail") or {}
+
+        def label(g):
+            """이머징·기타는 상위 2개국을 괄호로 — 뭉뚱그린 이름만으론 실체가 안 보임."""
+            out = f"{g} {pct[g]:.1f}%"
+            if g in ("이머징", "기타"):
+                inner = ", ".join(f"{c} {v / p['total_mkt'] * 100:.1f}%"
+                                  for c, v in gd.get(g, [])[:2]
+                                  if v / p["total_mkt"] * 100 >= 0.3)
+                if inner:
+                    out += f"({inner})"
+            return out
+
+        parts = [label(g) for g in ("한국", "미국", "유럽", "이머징", "기타")
                  if pct.get(g, 0) >= 0.05]
-        if pct.get("기타", 0) >= 0.05:
-            inner = ", ".join(f"{c} {v / p['total_mkt'] * 100:.1f}%"
-                              for c, v in (p.get("other_detail") or [])[:2]
-                              if v / p["total_mkt"] * 100 >= 0.3)
-            parts.append(f"기타 {pct['기타']:.1f}%" + (f"({inner})" if inner else ""))
         lines.append("   " + " · ".join(parts))
     lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
                  f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
