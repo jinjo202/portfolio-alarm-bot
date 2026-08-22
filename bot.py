@@ -21,6 +21,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pnl
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 HERE = Path(__file__).parent
@@ -370,6 +372,7 @@ def build_summary_prompt(payload):
 - 📰 뉴스 섹션은 실을 게 없으면 생략해도 된다.
 - 텔레그램 HTML만 사용: <b></b> 만 허용. 마크다운 금지. 전체 3500자 이내.
 - 첫 줄: "📊 포트폴리오 모닝브리프 — {today}"
+- payload에 pnl_block이 있으면 첫 줄 바로 다음에 그 텍스트를 <b>토씨 하나 바꾸지 말고 그대로</b> 넣어라(숫자 재계산·재포맷 금지).
 
 JSON:
 {json.dumps(payload, ensure_ascii=False)}"""
@@ -598,8 +601,10 @@ def main():
     disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
     print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
+    pnl_block = pnl.format_pnl(pnl.summarize_pnl())
     payload = {
         "date_kst": NOW.astimezone(KST).isoformat(),
+        "pnl_block": pnl_block,
         "events": events,
         "disclosures": disclosures,
         "news": news,
@@ -613,6 +618,9 @@ def main():
     if text is None:
         text = fallback_format(events, news, disclosures)
         source = "fallback(raw)"
+    if pnl_block and pnl_block not in text:   # 요약이 손익을 빠뜨렸으면 직접 삽입
+        head, _, rest = text.partition("\n")
+        text = f"{head}\n\n{pnl_block}\n{rest}"
     print(f"[info] 요약 소스: {source}")
     send_telegram(text)
     save_sent(state, [event_key(e) for e in events] + [news_key(n) for n in news]
@@ -659,5 +667,17 @@ def intraday():
     save_sent(state, sent_keys, judged=[news_key(n) for n in news])
 
 
+def market_close():
+    """한국장 마감 후: 손익만 간단히. 뉴스·공시는 수시 알림이 이미 담당."""
+    block = pnl.format_pnl(pnl.summarize_pnl())
+    if not block:
+        print("[warn] 손익 데이터 없음 — 발송 생략")
+        return
+    stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
+    send_telegram(f"🔔 <b>장 마감 손익</b> — {stamp}\n\n{block}")
+    print("발송 완료")
+
+
 if __name__ == "__main__":
-    intraday() if "intraday" in sys.argv[1:] else main()
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    {"intraday": intraday, "close": market_close}.get(mode, main)()
