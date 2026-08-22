@@ -97,7 +97,12 @@ def summarize_pnl():
             country[code] = country.get(code, 0) + row_mkt * w
     exposure = {}
     for code, v in country.items():
-        label = "유럽" if code in EUROPE else COUNTRY_KO.get(code, code)
+        if code in EUROPE:
+            label = "유럽"
+        elif code == "Other":   # 룩스루 소스가 국가를 특정 못 한 잔여분
+            label = "기타"
+        else:
+            label = COUNTRY_KO.get(code, code)
         exposure[label] = exposure.get(label, 0) + v
     country_mix = sorted(exposure.items(), key=lambda kv: -kv[1])
     return {
@@ -155,9 +160,9 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
     lines.append(f"· 총 평가금액: <b>{_won(p['total_mkt']).lstrip('+')}</b>")
     if p.get("country_mix") and p["total_mkt"]:
-        # 룩스루 국가 노출 — 2% 미만은 '기타'로 묶어 한 줄에 담기게
+        # 룩스루 국가 노출 — 2% 미만과 국가 미상은 '기타'로 묶어 한 줄에 담기게
         big = [(c, v / p["total_mkt"] * 100) for c, v in p["country_mix"]
-               if v / p["total_mkt"] * 100 >= 2.0]
+               if c != "기타" and v / p["total_mkt"] * 100 >= 2.0]
         rest = 100 - sum(pct for _, pct in big)
         mix = " · ".join(f"{c} {pct:.1f}%" for c, pct in big)
         if rest >= 0.05:
