@@ -86,32 +86,23 @@ def summarize_pnl():
     series = [v for v in ((obj.get("historical") or {}).get("portfolio_total") or [])
               if v is not None]
     avg_invested = sum(series) / len(series) if series else basis
-    # 지역별 평가금액 비중 (region 필드 그대로: 한국/미국/유럽/글로벌/이머징)
-    by_region = {}
-    for h in H:
-        r = h.get("region") or "기타"
-        by_region[r] = by_region.get(r, 0) + (h.get("mkt") or 0)
-    region_mix = sorted(by_region.items(), key=lambda kv: -kv[1])
-    # 지역 안의 국가 분해 (lookthrough.country 가중). 유럽·글로벌은 국가가 섞여 있어
-    # 지역 이름만으론 실제 노출이 안 보인다.
-    region_countries = {}
-    for reg in ("유럽", "글로벌"):
-        agg = {}
-        for row in H:
-            if (row.get("region") or "") != reg:
-                continue
-            row_mkt = row.get("mkt") or 0
-            for code, w in ((row.get("lookthrough") or {}).get("country") or {}).items():
-                agg[code] = agg.get(code, 0) + row_mkt * w
-        total = sum(agg.values())
-        if total:
-            region_countries[reg] = [(COUNTRY_KO.get(c, c), v / total * 100)
-                                     for c, v in sorted(agg.items(), key=lambda kv: -kv[1])
-                                     if c != "Other"]
+    # 국가 노출 — 지역 카테고리가 아니라 전체 포트폴리오를 룩스루해서 국가 단위로 집계.
+    # (ETF의 lookthrough.country 가중 × 평가금액). 유럽 국가는 '유럽'으로 합치고,
+    # 그 외 개별 국가는 그대로 둔다 — '글로벌' 같은 카테고리엔 유럽이 섞여 있어
+    # 그대로 쓰면 실제 국가 노출이 안 보인다.
+    country = {}
+    for row in H:
+        row_mkt = row.get("mkt") or 0
+        for code, w in ((row.get("lookthrough") or {}).get("country") or {}).items():
+            country[code] = country.get(code, 0) + row_mkt * w
+    exposure = {}
+    for code, v in country.items():
+        label = "유럽" if code in EUROPE else COUNTRY_KO.get(code, code)
+        exposure[label] = exposure.get(label, 0) + v
+    country_mix = sorted(exposure.items(), key=lambda kv: -kv[1])
     return {
         "as_of": obj.get("last_updated", ""),
-        "region_mix": region_mix,
-        "region_countries": region_countries,
+        "country_mix": country_mix,
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
@@ -130,6 +121,10 @@ def summarize_pnl():
         if tot("mkt", ov) - tot("daily_pnl", ov) else 0,
     }
 
+
+# 룩스루에서 '유럽'으로 합칠 국가코드
+EUROPE = {"DE", "UK", "GB", "FR", "CH", "NL", "IT", "ES", "SE", "DK", "NO",
+          "FI", "BE", "IE", "AT", "PT", "LU", "PL", "GR", "CZ"}
 
 COUNTRY_KO = {
     "JP": "일본", "CA": "캐나다", "UK": "영국", "GB": "영국", "FR": "프랑스",
@@ -159,17 +154,15 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
         return None
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
     lines.append(f"· 총 평가금액: <b>{_won(p['total_mkt']).lstrip('+')}</b>")
-    if p.get("region_mix") and p["total_mkt"]:
-        parts = []
-        for r, v in p["region_mix"]:
-            pct = v / p["total_mkt"] * 100
-            detail = p.get("region_countries", {}).get(r)
-            if detail:   # 유럽·글로벌은 룩스루 상위 국가를 괄호로
-                inner = ", ".join(f"{c} {cp:.0f}%" for c, cp in detail[:3])
-                parts.append(f"{r} {pct:.1f}%({inner})")
-            else:
-                parts.append(f"{r} {pct:.1f}%")
-        lines.append("   " + " · ".join(parts))
+    if p.get("country_mix") and p["total_mkt"]:
+        # 룩스루 국가 노출 — 2% 미만은 '기타'로 묶어 한 줄에 담기게
+        big = [(c, v / p["total_mkt"] * 100) for c, v in p["country_mix"]
+               if v / p["total_mkt"] * 100 >= 2.0]
+        rest = 100 - sum(pct for _, pct in big)
+        mix = " · ".join(f"{c} {pct:.1f}%" for c, pct in big)
+        if rest >= 0.05:
+            mix += f" · 기타 {rest:.1f}%"
+        lines.append(f"   {mix}")
     lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
                  f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
