@@ -97,12 +97,12 @@ def summarize_pnl():
     region_countries = {}
     for reg in ("유럽", "글로벌"):
         agg = {}
-        for h in H:
-            if (h.get("region") or "") != reg:
+        for row in H:
+            if (row.get("region") or "") != reg:
                 continue
-            mkt = h.get("mkt") or 0
-            for code, w in ((h.get("lookthrough") or {}).get("country") or {}).items():
-                agg[code] = agg.get(code, 0) + mkt * w
+            row_mkt = row.get("mkt") or 0
+            for code, w in ((row.get("lookthrough") or {}).get("country") or {}).items():
+                agg[code] = agg.get(code, 0) + row_mkt * w
         total = sum(agg.values())
         if total:
             region_countries[reg] = [(COUNTRY_KO.get(c, c), v / total * 100)
