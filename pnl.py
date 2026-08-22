@@ -86,8 +86,15 @@ def summarize_pnl():
     series = [v for v in ((obj.get("historical") or {}).get("portfolio_total") or [])
               if v is not None]
     avg_invested = sum(series) / len(series) if series else basis
+    # 지역별 평가금액 비중 (region 필드 그대로: 한국/미국/유럽/글로벌/이머징)
+    by_region = {}
+    for h in H:
+        r = h.get("region") or "기타"
+        by_region[r] = by_region.get(r, 0) + (h.get("mkt") or 0)
+    region_mix = sorted(by_region.items(), key=lambda kv: -kv[1])
     return {
         "as_of": obj.get("last_updated", ""),
+        "region_mix": region_mix,
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
@@ -126,6 +133,9 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
         return None
     lines = [f"💵 <b>손익</b> ({p['close_date'] or p['as_of']} 종가 기준)"]
     lines.append(f"· 총 평가금액: <b>{_won(p['total_mkt']).lstrip('+')}</b>")
+    if p.get("region_mix") and p["total_mkt"]:
+        mix = " · ".join(f"{r} {v / p['total_mkt'] * 100:.1f}%" for r, v in p["region_mix"])
+        lines.append(f"   {mix}")
     lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
                  f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
