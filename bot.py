@@ -166,6 +166,35 @@ def build_universe(holdings, lookthrough):
 
 # ---------- 2. 이벤트 수집 ----------
 
+US_INDEXES = [("S&P500", "^GSPC"), ("나스닥", "^IXIC"), ("필라델피아반도체", "^SOX"),
+              ("다우", "^DJI"), ("러셀2000", "^RUT")]
+KR_INDEXES = [("코스피", "^KS11"), ("코스닥", "^KQ11")]
+
+
+def fetch_index_moves(indexes):
+    """지수별 직전 거래일 대비 등락률. [(라벨, 등락%, 기준일)]"""
+    import yfinance as yf
+    out = []
+    for label, tk in indexes:
+        try:
+            closes = yf.Ticker(tk).history(period="7d")["Close"].dropna()
+            if len(closes) < 2:
+                continue
+            pct = (closes.iloc[-1] / closes.iloc[-2] - 1) * 100
+            out.append((label, pct, closes.index[-1].date().isoformat()))
+        except Exception as e:
+            print(f"[warn] index {tk}: {e}")
+    return out
+
+
+def format_market(indexes, title):
+    rows = fetch_index_moves(indexes)
+    if not rows:
+        return None
+    body = " · ".join(f"{label} {pct:+.2f}%" for label, pct, _ in rows)
+    return f"🌐 <b>{title}</b> ({rows[0][2]})\n   {body}"
+
+
 def fetch_calendar_events(tickers):
     """yfinance calendar → D-7 이내 실적 발표일·배당락일."""
     import yfinance as yf
@@ -648,6 +677,7 @@ def main():
     disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
     print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
+    market_block = format_market(US_INDEXES, "미국 시장 동향")
     pnl_summary = pnl.summarize_pnl()
     pnl_block = pnl.format_pnl(pnl_summary, daily_label="전일 대비 평가손익")
     if pnl_block:
