@@ -654,6 +654,8 @@ def main():
         why = explain_pnl(pnl_summary, news=news)
         if why:
             pnl_block += "\n" + why
+    if market_block:   # 손익 블록에 붙여 요약이 통째로 앞에 싣도록
+        pnl_block = (pnl_block + "\n\n" + market_block) if pnl_block else market_block
     payload = {
         "date_kst": NOW.astimezone(KST).isoformat(),
         "pnl_block": pnl_block,
@@ -729,6 +731,9 @@ def market_close():
     why = explain_pnl(p, kr_only=True)
     if why:
         block += "\n" + why
+    market_block = format_market(KR_INDEXES, "한국 시장 동향")
+    if market_block:
+        block += "\n\n" + market_block
     stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
     send_telegram(f"🔔 <b>국내 장 마감 손익</b> — {stamp}\n\n{block}")
     print("발송 완료")
