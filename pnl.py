@@ -115,10 +115,19 @@ def summarize_pnl():
             detail[label][nm] = detail[label].get(nm, 0) + v
     country_mix = sorted(exposure.items(), key=lambda kv: -kv[1])
     # 일간 손익 기여 종목 (변화 요인 설명용). 절대 기여액 큰 순.
+    def _top_sector(h):
+        se = h.get("sector_exposure") or {}
+        return max(se, key=se.get) if se else ""
+
     movers = sorted(
         ({"name": h["name"], "pnl": h.get("daily_pnl") or 0,
           "pct": h.get("daily_chg_pct") or 0,
-          "kr": (h.get("region") or "") == "한국"}
+          "region": h.get("region") or "",
+          "kr": (h.get("region") or "") == "한국",
+          # 해설을 종목 나열이 아니라 섹터·테마 단위로 쓰기 위한 힌트
+          "sector": _top_sector(h),
+          "holdings": [t.get("name") for t in (h.get("top_holdings") or [])[:3]
+                       if t.get("name")]}
          for h in H if h.get("daily_pnl")),
         key=lambda m: -abs(m["pnl"]))
     group_detail = {g: sorted(d.items(), key=lambda kv: -kv[1])
