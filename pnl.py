@@ -191,11 +191,11 @@ COUNTRY_KO = {
 
 
 def _won(v):
-    """억원 단위 값을 조/억 표기로. 1,000억 이상은 조원."""
+    """억원 단위 값을 조/억 표기로. 1,000억 이상은 조원. 소수점 한 자리."""
     sign = "+" if v > 0 else ""
     if abs(v) >= 10000:
-        return f"{sign}{v / 10000:,.2f}조원"
-    return f"{sign}{v:,.2f}억원"
+        return f"{sign}{v / 10000:,.1f}조원"
+    return f"{sign}{v:,.1f}억원"
 
 
 def top_movers(p, kr_only=False, n=3):
@@ -231,9 +231,9 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
 
         def label(g):
             """이머징·기타는 상위 2개국을 괄호로 — 뭉뚱그린 이름만으론 실체가 안 보임."""
-            out = f"{g} {pct[g]:.1f}%"
+            out = f"{g} {pct[g]:.0f}%"
             if g in ("이머징", "기타"):
-                inner = ", ".join(f"{c} {v / p['total_mkt'] * 100:.1f}%"
+                inner = ", ".join(f"{c} {v / p['total_mkt'] * 100:.0f}%"
                                   for c, v in gd.get(g, [])[:2]
                                   if v / p["total_mkt"] * 100 >= 0.3)
                 if inner:
@@ -243,8 +243,7 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
         parts = [label(g) for g in ("한국", "미국", "유럽", "이머징", "기타")
                  if pct.get(g, 0) >= 0.05]
         lines.append("   " + " · ".join(parts))
-    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> "
-                 f"({p['total_pnl_pct']:+.2f}% · 평균잔액 {_won(p['avg_invested']).lstrip('+')})")
+    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> ({p['total_pnl_pct']:+.2f}%)")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
     if kr_only:
         lines.append(f"· {daily_label}(국내): <b>{_won(p['daily_pnl_kr'])}</b> "
