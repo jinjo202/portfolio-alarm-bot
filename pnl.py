@@ -210,7 +210,7 @@ def format_movers(p, kr_only=False):
     if not rows:
         return None
     return "📌 요인: " + " · ".join(
-        f"{m['name']} {_won(m['pnl'])}({m['pct']:+.2f}%)" for m in rows)
+        f"{m['name']} {_won(m['pnl'])}({m['pct']:+.1f}%)" for m in rows)
 
 
 def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
@@ -243,16 +243,16 @@ def format_pnl(p, daily_label="금일 평가손익", kr_only=False):
         parts = [label(g) for g in ("한국", "미국", "유럽", "이머징", "기타")
                  if pct.get(g, 0) >= 0.05]
         lines.append("   " + " · ".join(parts))
-    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> ({p['total_pnl_pct']:+.2f}%)")
+    lines.append(f"· YTD 총손익: <b>{_won(p['total_pnl'])}</b> ({p['total_pnl_pct']:+.1f}%)")
     lines.append(f"   평가 {_won(p['unrealized'])} · 매각 {_won(p['realized'])} · 배당 {_won(p['dividend'])}")
     if kr_only:
         lines.append(f"· {daily_label}(국내): <b>{_won(p['daily_pnl_kr'])}</b> "
-                     f"({p['daily_pct_kr']:+.2f}%)")
+                     f"({p['daily_pct_kr']:+.1f}%)")
         lines.append("   해외는 아직 당일 시세 미반영 — 내일 아침 브리프에서 확인")
     else:
         lines.append(f"· {daily_label}: <b>{_won(p['daily_pnl'])}</b>")
-        lines.append(f"   국내 {_won(p['daily_pnl_kr'])} ({p['daily_pct_kr']:+.2f}%) · "
-                     f"해외 {_won(p['daily_pnl_ov'])} ({p['daily_pct_ov']:+.2f}%)")
+        lines.append(f"   국내 {_won(p['daily_pnl_kr'])} ({p['daily_pct_kr']:+.1f}%) · "
+                     f"해외 {_won(p['daily_pnl_ov'])} ({p['daily_pct_ov']:+.1f}%)")
     return "\n".join(lines)
 
 
