@@ -114,11 +114,19 @@ def summarize_pnl():
             detail.setdefault(label, {})
             detail[label][nm] = detail[label].get(nm, 0) + v
     country_mix = sorted(exposure.items(), key=lambda kv: -kv[1])
+    # 일간 손익 기여 종목 (변화 요인 설명용). 절대 기여액 큰 순.
+    movers = sorted(
+        ({"name": h["name"], "pnl": h.get("daily_pnl") or 0,
+          "pct": h.get("daily_chg_pct") or 0,
+          "kr": (h.get("region") or "") == "한국"}
+         for h in H if h.get("daily_pnl")),
+        key=lambda m: -abs(m["pnl"]))
     group_detail = {g: sorted(d.items(), key=lambda kv: -kv[1])
                     for g, d in detail.items()}
     return {
         "as_of": obj.get("last_updated", ""),
         "country_mix": country_mix,
+        "movers": movers,
         "group_detail": group_detail,
         "close_date": dates[-1] if dates else "",
         "total_mkt": mkt,
@@ -162,6 +170,21 @@ def _won(v):
     if abs(v) >= 10000:
         return f"{sign}{v / 10000:,.2f}조원"
     return f"{sign}{v:,.2f}억원"
+
+
+def top_movers(p, kr_only=False, n=3):
+    """일간 손익 기여 상위 n개. kr_only면 국내 종목만."""
+    rows = [m for m in (p.get("movers") or []) if m["kr"] or not kr_only]
+    return rows[:n]
+
+
+def format_movers(p, kr_only=False):
+    """변화 요인 한 줄 — Codex 해설이 없을 때 쓰는 사실 나열."""
+    rows = top_movers(p, kr_only)
+    if not rows:
+        return None
+    return "📌 요인: " + " · ".join(
+        f"{m['name']} {_won(m['pnl'])}({m['pct']:+.2f}%)" for m in rows)
 
 
 def format_pnl(p, daily_label="금일 평가손익", kr_only=False):

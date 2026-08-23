@@ -444,6 +444,47 @@ INTRADAY_SCHEMA = {
 }
 
 
+PNL_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["comment"],
+    "properties": {"comment": {"type": "string"}},
+}
+
+
+def explain_pnl(p, kr_only=False, news=()):
+    """일간 손익 변화 요인을 1~2줄로. Codex 없으면 기여 종목 나열로 폴백."""
+    if not p:
+        return None
+    movers = pnl.top_movers(p, kr_only, n=6)
+    if not movers:
+        return None
+    total = p["daily_pnl_kr"] if kr_only else p["daily_pnl"]
+    payload = {
+        "일간손익_억원": round(total, 2),
+        "기여종목": [{"종목": m["name"], "손익_억원": round(m["pnl"], 2),
+                    "등락률": round(m["pct"], 2)} for m in movers],
+        "관련뉴스": [n["title"] for n in list(news)[:15]],
+    }
+    prompt = f"""아래는 내 포트폴리오의 하루 손익과 종목별 기여도다.
+왜 이런 손익이 났는지 <b>한국어 1~2문장</b>으로만 설명하라.
+
+규칙:
+- 숫자를 새로 계산하지 말고 주어진 값만 인용하라.
+- 어느 종목이 얼마나 끌어올렸는지/끌어내렸는지 구체적으로 언급하라.
+- 관련뉴스에 원인으로 볼 만한 게 있으면 한 개만 짧게 연결하라. 없으면 억지로 만들지 마라.
+- 시황 일반론("투자심리 개선" 등)만 늘어놓지 마라.
+- 텔레그램 HTML만 사용(<b></b>만 허용). 앞에 "📌 요인: "을 붙여라.
+
+JSON:
+{json.dumps(payload, ensure_ascii=False)}"""
+    data = codex_exec(prompt, PNL_SCHEMA)
+    if data and data.get("comment"):
+        return data["comment"]
+    return pnl.format_movers(p, kr_only)
+
+
 def judge_urgent_news(news, held_via):
     """수시 알림용: 새 뉴스 중 즉시 알릴 가치 있는 것만 Codex가 선별. [(text, [idx...])] 반환, 실패 시 None."""
     items = [{"idx": i, "query": n["query"], "title": n["title"], "source": n["source"],
@@ -601,7 +642,12 @@ def main():
     disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
     print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
-    pnl_block = pnl.format_pnl(pnl.summarize_pnl(), daily_label="전일 대비 평가손익")
+    pnl_summary = pnl.summarize_pnl()
+    pnl_block = pnl.format_pnl(pnl_summary, daily_label="전일 대비 평가손익")
+    if pnl_block:
+        why = explain_pnl(pnl_summary, news=news)
+        if why:
+            pnl_block += "\n" + why
     payload = {
         "date_kst": NOW.astimezone(KST).isoformat(),
         "pnl_block": pnl_block,
@@ -669,10 +715,14 @@ def intraday():
 
 def market_close():
     """한국장 마감 후: 손익만 간단히. 뉴스·공시는 수시 알림이 이미 담당."""
-    block = pnl.format_pnl(pnl.summarize_pnl(), kr_only=True)
+    p = pnl.summarize_pnl()
+    block = pnl.format_pnl(p, kr_only=True)
     if not block:
         print("[warn] 손익 데이터 없음 — 발송 생략")
         return
+    why = explain_pnl(p, kr_only=True)
+    if why:
+        block += "\n" + why
     stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
     send_telegram(f"🔔 <b>국내 장 마감 손익</b> — {stamp}\n\n{block}")
     print("발송 완료")
