@@ -187,12 +187,61 @@ def fetch_index_moves(indexes):
     return out
 
 
-def format_market(indexes, title):
+# 섹터 대용 ETF (미국: SPDR 섹터, 한국: KODEX/TIGER 섹터)
+US_SECTORS = [("기술", "XLK"), ("금융", "XLF"), ("헬스케어", "XLV"), ("산업재", "XLI"),
+              ("소재", "XLB"), ("경기소비", "XLY"), ("필수소비", "XLP"),
+              ("커뮤니케이션", "XLC"), ("에너지", "XLE"), ("유틸리티", "XLU"), ("리츠", "XLRE")]
+KR_SECTORS = [("반도체", "091160.KS"), ("자동차", "091180.KS"), ("은행", "091170.KS"),
+              ("증권", "102970.KS"), ("철강", "117680.KS"), ("건설", "117700.KS"),
+              ("에너지화학", "117460.KS"), ("바이오", "244580.KS"), ("2차전지", "305720.KS"),
+              ("기계장비", "102960.KS"), ("미디어엔터", "266360.KS"), ("헬스케어", "266420.KS")]
+
+MARKET_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["comment"],
+    "properties": {"comment": {"type": "string"}},
+}
+
+
+def comment_market(title, indexes, sectors):
+    """시장 동향 한두 줄 총평. Codex 없으면 None."""
+    payload = {
+        "지수": [{"이름": l, "등락률": round(v, 2)} for l, v, _ in indexes],
+        "섹터": [{"이름": l, "등락률": round(v, 2)} for l, v, _ in sectors],
+    }
+    prompt = f"""아래는 {title}의 지수·섹터 등락률이다. <b>한국어 1~2문장</b>으로 짧게 총평하라.
+
+규칙:
+- 전반이 오름세인지 내림세인지, 무엇이 주도했고 무엇이 눌렸는지 섹터 이름으로 짚어라.
+- 숫자는 필요하면 한두 개만 인용. 나열하지 마라(위에 이미 표시됨).
+- 근거 없는 원인 추정(금리·연준 발언 등)은 쓰지 마라. 주어진 등락률로 읽히는 것만 써라.
+- 텔레그램 HTML <b></b>만 허용. 접두어 없이 문장만.
+
+JSON:
+{json.dumps(payload, ensure_ascii=False)}"""
+    data = codex_exec(prompt, MARKET_SCHEMA)
+    return data["comment"] if data and data.get("comment") else None
+
+
+def format_market(indexes, title, sectors=None):
     rows = fetch_index_moves(indexes)
     if not rows:
         return None
-    body = " · ".join(f"{label} {pct:+.2f}%" for label, pct, _ in rows)
-    return f"🌐 <b>{title}</b> ({rows[0][2]})\n   {body}"
+    out = [f"🌐 <b>{title}</b> ({rows[0][2]})",
+           "   " + " · ".join(f"{label} {pct:+.2f}%" for label, pct, _ in rows)]
+    srows = fetch_index_moves(sectors) if sectors else []
+    if srows:
+        srows.sort(key=lambda r: -r[1])
+        up = " · ".join(f"{l} {v:+.2f}%" for l, v, _ in srows[:3])
+        down = " · ".join(f"{l} {v:+.2f}%" for l, v, _ in srows[-3:][::-1])
+        out.append(f"   ▲ {up}")
+        out.append(f"   ▼ {down}")
+    note = comment_market(title, rows, srows)
+    if note:
+        out.append(f"   💬 {note}")
+    return "\n".join(out)
 
 
 def fetch_calendar_events(tickers):
@@ -677,7 +726,7 @@ def main():
     disclosures = [d for d in disclosures if disclosure_key(d) not in seen]
     print(f"신규 이벤트 {len(events)} / 신규 뉴스 {len(news)} / 신규 공시 {len(disclosures)}")
 
-    market_block = format_market(US_INDEXES, "미국 시장 동향")
+    market_block = format_market(US_INDEXES, "미국 시장 동향", US_SECTORS)
     pnl_summary = pnl.summarize_pnl()
     pnl_block = pnl.format_pnl(pnl_summary, daily_label="전일 대비 평가손익")
     if pnl_block:
@@ -761,7 +810,7 @@ def market_close():
     why = explain_pnl(p, kr_only=True)
     if why:
         block += "\n" + why
-    market_block = format_market(KR_INDEXES, "한국 시장 동향")
+    market_block = format_market(KR_INDEXES, "한국 시장 동향", KR_SECTORS)
     if market_block:
         block += "\n\n" + market_block
     stamp = NOW.astimezone(KST).strftime("%m/%d %H:%M")
