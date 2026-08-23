@@ -37,6 +37,20 @@ def _password():
     return pw.strip().lstrip("﻿") if pw else None
 
 
+def _remote_file(repo, path):
+    """origin/main 최신 파일 내용. fetch/show 실패하면 None(→ 로컬 파일 폴백)."""
+    import subprocess
+    try:
+        subprocess.run(["git", "-C", repo, "fetch", "origin", "--quiet"],
+                       capture_output=True, timeout=90, check=True)
+        out = subprocess.run(["git", "-C", repo, "show", f"origin/main:{path}"],
+                             capture_output=True, timeout=60, check=True)
+        return out.stdout.decode("utf-8", "ignore")
+    except Exception as e:
+        print(f"[warn] origin/main {path} 조회 실패, 로컬 파일 사용: {e}")
+        return None
+
+
 def load_portfolio():
     """복호화된 portfolio-data dict. 키·레포·의존성 없으면 None."""
     repo = os.environ.get("PF_DASH_LOCAL_REPO")
@@ -46,6 +60,9 @@ def load_portfolio():
     enc = Path(repo) / "portfolio-data.js"
     if not enc.exists():
         return None
+    # 로컬 클론은 누가 pull 해주지 않으면 며칠씩 뒤처진다(실제로 그랬다).
+    # 워킹트리는 건드리지 않고 origin/main의 파일 내용만 꺼내 쓴다.
+    cipher_text = _remote_file(repo, "portfolio-data.js") or enc.read_text(encoding="utf-8")
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -55,7 +72,7 @@ def load_portfolio():
         return None
     try:
         blob = base64.b64decode(
-            re.search(r'ENCRYPTED\s*=\s*"([^"]+)"', enc.read_text(encoding="utf-8")).group(1))
+            re.search(r'ENCRYPTED\s*=\s*"([^"]+)"', cipher_text).group(1))
         salt, nonce, ct = blob[:16], blob[16:28], blob[28:]
         key = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
                          salt=salt, iterations=200_000).derive(pw.encode())
