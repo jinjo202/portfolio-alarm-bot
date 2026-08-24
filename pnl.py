@@ -99,6 +99,7 @@ def summarize_pnl():
     dividend = tot("dividend")
     # 기준일: 종목별 daily_close_date 중 가장 최근 (국내/해외 마감 시차 존재)
     dates = sorted({h.get("daily_close_date") for h in H if h.get("daily_close_date")})
+    kr_dates = sorted({h.get("daily_close_date") for h in kr if h.get("daily_close_date")})
     # 수익률 분모 = 시간가중 평균잔액. 대시보드 computeAvgBalanceFromHistorical()와 같은 정의.
     series = [v for v in ((obj.get("historical") or {}).get("portfolio_total") or [])
               if v is not None]
@@ -155,6 +156,7 @@ def summarize_pnl():
         "movers": movers,
         "group_detail": group_detail,
         "close_date": dates[-1] if dates else "",
+        "close_date_kr": kr_dates[-1] if kr_dates else "",
         "total_mkt": mkt,
         "total_pnl": unrealized + realized + dividend,
         "avg_invested": avg_invested,

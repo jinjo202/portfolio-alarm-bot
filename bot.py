@@ -801,8 +801,20 @@ def intraday():
 
 
 def market_close():
-    """한국장 마감 후: 손익만 간단히. 뉴스·공시는 수시 알림이 이미 담당."""
+    """한국장 마감 후: 손익만 간단히. 뉴스·공시는 수시 알림이 이미 담당.
+
+    pf-dash의 당일 종가 반영(daily_update)은 15:37~16:29 슬롯이 순차 실행되며
+    보통 16:55~17:00경에야 최종 확정된다 — 그 전에 보내면 장중 스냅샷을 "장마감
+    확정치"로 오인시킨다(실제 사례: -41억인데 -19억으로 발송). close_date_kr이
+    오늘(KST)이 아니면 조용히 건너뛰고, 다음 스케줄(잡은 여러 번 걸어둠)에서 다시
+    시도한다.
+    """
     p = pnl.summarize_pnl()
+    today_kst = NOW.astimezone(KST).date().isoformat()
+    if not p or p.get("close_date_kr") != today_kst:
+        print(f"[info] 국내 종가 미확정(close_date_kr={p.get('close_date_kr') if p else None}, "
+              f"오늘={today_kst}) — 발송 생략, 다음 스케줄에서 재시도")
+        return
     block = pnl.format_pnl(p, kr_only=True)
     if not block:
         print("[warn] 손익 데이터 없음 — 발송 생략")
