@@ -9,6 +9,7 @@
 
 secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY(선택)
 """
+import difflib
 import html
 import io
 import json
@@ -447,7 +448,9 @@ def build_summary_prompt(payload):
 - 💰 배당과 📈 실적 섹션은 항상 넣어라 — payload의 events(type: ex_dividend/earnings)에 해당 항목이 없으면
   섹션 자체를 빼지 말고 "· 없음"이라고 명시해라. (놓친 게 아니라 확인했다는 걸 보여주기 위함)
 - payload에 disclosures(DART 공시)가 있으면 📢 공시 섹션으로 전부 표시하라(공시는 필터링 금지, 제목+URL).
-- 📰 뉴스 섹션은 실을 게 없으면 생략해도 된다.
+- 📰 뉴스는 핵심만 최대 6개. news에 같은 회사·같은 사건을 다룬 기사가 여러 건이면
+  (매체만 다르고 내용이 같은 경우 포함) 절대 각각 넣지 말고 반드시 하나로 합쳐 한 줄로 써라.
+  같은 회사라도 서로 다른 사건이면 별개 항목으로 남겨도 된다. 실을 게 없으면 섹션 생략.
 - 텔레그램 HTML만 사용: <b></b> 만 허용. 마크다운 금지. 전체 3500자 이내.
 - 첫 줄: "📊 포트폴리오 모닝브리프 — {today}"
 - payload에 pnl_block이 있으면 첫 줄 바로 다음에 그 텍스트를 <b>토씨 하나 바꾸지 말고 그대로</b> 넣어라(숫자 재계산·재포맷 금지).
@@ -688,6 +691,19 @@ def load_universe():
     return holdings, lookthrough, constituents
 
 
+def dedupe_news(items):
+    """제목이 비슷한 근접 중복(같은 사건, 다른 매체·다른 URL)을 하나로 합친다.
+    URL 기준 dedup(news_key)로는 못 잡는다 — 매체마다 리다이렉트 URL이 달라서."""
+    kept, norms = [], []
+    for it in items:
+        norm = re.sub(r"[^\w가-힣]", "", it["title"]).lower()
+        if any(difflib.SequenceMatcher(None, norm, n).ratio() > 0.62 for n in norms):
+            continue
+        kept.append(it)
+        norms.append(norm)
+    return kept
+
+
 def collect_news(holdings, lookthrough, constituents):
     """구성종목 + 룩스루 없는 직접보유(펀드/테마ETF는 자체 뉴스 감시)."""
     news = []
@@ -696,6 +712,9 @@ def collect_news(holdings, lookthrough, constituents):
     for name in targets:
         news.extend(fetch_news(name, is_korean(name)))
         time.sleep(0.4)
+    before = len(news)
+    news = dedupe_news(news)
+    print(f"[info] 뉴스 근접중복 제거: {before} → {len(news)}")
     return news
 
 
