@@ -469,9 +469,9 @@ CODEX_SCHEMA = {
 }
 
 
-def codex_exec(prompt, schema):
+def codex_exec(prompt, schema, web_search=False, reasoning_effort="medium", timeout_seconds=180):
     """맥미니 전용 자동화 ChatGPT 계정(CODEX_HOME)으로 codex exec 호출 — 구독 정액, API 과금 없음.
-    schema에 맞는 dict 반환, 불가하면 None."""
+    schema에 맞는 dict 반환, 불가하면 None. web_search=True면 codex의 실시간 검색 도구를 켠다."""
     import shutil
     import subprocess
     import tempfile
@@ -488,16 +488,19 @@ def codex_exec(prompt, schema):
         workdir = tmp / "workdir"
         workdir.mkdir()
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
-        command = [binary, "exec", "--ignore-user-config", "--ignore-rules",
-                   "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
-                   "--model", "gpt-5.6-luna",
-                   "--config", 'model_reasoning_effort="medium"',
-                   "--output-schema", str(schema_path),
-                   "--output-last-message", str(result_path),
-                   "-C", str(workdir), "-"]
+        command = [binary]
+        if web_search:
+            command.append("--search")
+        command += ["exec", "--ignore-user-config", "--ignore-rules",
+                    "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
+                    "--model", "gpt-5.6-luna",
+                    "--config", f'model_reasoning_effort="{reasoning_effort}"',
+                    "--output-schema", str(schema_path),
+                    "--output-last-message", str(result_path),
+                    "-C", str(workdir), "-"]
         try:
             completed = subprocess.run(command, input=prompt, capture_output=True, text=True,
-                                        env=environment, timeout=180, check=False)
+                                        env=environment, timeout=timeout_seconds, check=False)
             if completed.returncode != 0:
                 print(f"[warn] codex exec 실패({completed.returncode}): {completed.stderr[:500]}")
                 return None
