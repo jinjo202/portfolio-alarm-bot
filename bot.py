@@ -852,6 +852,73 @@ def market_close():
     print("발송 완료")
 
 
+def build_us_market_briefing_prompt():
+    today = NOW.astimezone(KST)
+    weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
+    weekend_note = ""
+    if today.weekday() == 0:   # 월요일 — 금요일 마감부터 주말까지 포함
+        weekend_note = ("\n오늘은 월요일이다. 지난 금요일 미국장 마감부터 주말 동안 나온 굵직한 뉴스·"
+                        "매크로 이벤트까지 포함해서 다뤄라(주말치 반영이라고 밝혀도 된다).")
+    return f"""너는 사용자를 위한 미국 증시 아침 브리핑 담당자다. 오늘은 {today.strftime('%Y-%m-%d')} ({weekday_kr}) 한국시간 아침이다.{weekend_note}
+
+[필수 규칙]
+1. 반드시 웹 검색으로 가장 최근 미국 증시 마감 데이터를 먼저 확인해라. 검색으로 확인되지 않은 수치는 절대 쓰지 마라.
+2. 기사 제목 나열 금지. "무엇이 일어났는가"보다 "왜 그렇게 움직였는가"를 써라.
+3. 확실한 사실과 시장의 해석을 구분해서 표기해라.
+4. 투자 추천, 매수/매도 의견, 목표가 제시 금지. 판단은 사용자가 한다. 너는 재료만 정리한다.
+5. 전체 분량은 커피 한 잔 마시며 읽을 수 있는 길이로 — 3분 이내에 읽히게.
+6. 텔레그램 HTML만 허용: <b></b>, <pre></pre> 만 사용. 마크다운(#, **, |표|) 금지.
+   표는 <pre></pre> 블록 안에 고정폭으로 정렬해서 넣어라.
+
+[출력 형식 — 이 순서와 제목 그대로]
+
+<b>{today.strftime('%m/%d')} 미국장 브리핑</b>
+
+<b>1. 한 줄 요약</b>
+어젯밤 미국장을 한 문장으로. 시장의 성격을 규정할 것.
+(예: "금리 기대가 되돌려지면서 기술주 중심으로 차익 실현이 나온 하루")
+
+<b>2. 지수 마감</b>
+S&P 500 / 나스닥 / 다우 / 러셀2000을 <pre></pre> 표로: 종가와 등락률.
+보조지표(미 10년물 국채금리, 달러인덱스, VIX, WTI)는 수치와 전일 대비 방향만.
+이어서 '섹터별 등락' — 11개 GICS 섹터 중 가장 강했던 3개, 가장 약했던 3개만 등락률과 함께.
+
+<b>3. 오늘의 움직임, 왜?</b>
+가장 중요한 이유 2~3개만. 각각 이렇게:
+· [재료 이름] — 무슨 일이 있었는지 1~2문장
+  → 시장이 이걸 왜 그렇게 받아들였는지 1~2문장
+  → 이게 앞으로 뭘 의미하는지 1문장
+
+<b>4. 눈에 띈 종목</b>
+평소와 다르게 움직인 종목 3~5개를 <pre></pre> 표로: 종목 / 등락률 / 이유.
+이유를 모르면 그 종목은 빼라.
+
+<b>5. 오늘 밤 볼 것</b>
+오늘(한국시간 기준 오늘 밤) 예정된 지표 발표·실적 발표·이벤트. 없으면 "특별한 일정 없음"이라고 쓰고 억지로 채우지 마라.
+
+<b>6. 확인 필요</b>
+검색으로 확인 안 됐거나 출처 간 수치가 엇갈린 항목만. 없으면 이 섹션 자체를 빼라."""
+
+
+US_MARKET_SCHEMA = CODEX_SCHEMA  # {"message": str} — 위 형식 그대로 담긴 텔레그램 본문
+
+
+def us_market_briefing():
+    """미국 증시 아침 브리핑 — 웹검색 필수, Codex 구독 계정 사용.
+    codex_exec가 web_search=True로 --search를 켠다. 계정 사용량 한도에 걸리면
+    (codex_exec가 None을 돌려줌) 지어낸 숫자를 보낼 수 없으니 그냥 건너뛴다 —
+    다음날 스케줄에서 다시 시도."""
+    prompt = build_us_market_briefing_prompt()
+    data = codex_exec(prompt, US_MARKET_SCHEMA, web_search=True,
+                      reasoning_effort="high", timeout_seconds=280)
+    if not data or not data.get("message"):
+        print("[warn] 미국장 브리핑 생성 실패(Codex 웹검색 불가) — 발송 생략, 내일 재시도")
+        return
+    send_telegram(data["message"])
+    print("발송 완료")
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    {"intraday": intraday, "close": market_close}.get(mode, main)()
+    {"intraday": intraday, "close": market_close,
+     "us_market": us_market_briefing}.get(mode, main)()
